@@ -1,0 +1,69 @@
+name: Workflow CI
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Run actions/checkout@v3
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12.7
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12.7"
+
+      - name: Check Env
+        run: |
+          python --version
+          pip --version
+
+      - name: Install dependencies
+        run: |
+          pip install mlflow==2.19.0 pandas scikit-learn
+
+      - name: Run mlflow project
+        run: |
+          mlflow run MLProject/ --env-manager=local
+
+      - name: Get latest MLflow run_id
+        id: get_run_id
+        run: |
+          RUN_ID=$(ls -td mlruns/0/* | head -1 | basename $(xargs))
+          echo "RUN_ID=$RUN_ID" >> $GITHUB_ENV
+          echo "Run ID berhasil didapatkan: $RUN_ID"
+
+      - name: Install Python dependencies
+        run: |
+          echo "Memverifikasi dependencies..."
+
+      - name: Upload to GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlflow-model-artifacts
+          path: mlruns/
+
+      - name: Build Docker Model
+        run: |
+          mlflow models build-docker -m "runs:/${{ env.RUN_ID }}/model" -n ${{ secrets.DOCKERHUB_USERNAME }}/mobile_price_model:latest --env-manager=local
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Tag Docker Image
+        run: |
+          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/mobile_price_model:latest ${{ secrets.DOCKERHUB_USERNAME }}/mobile_price_model:v1
+
+      - name: Push Docker Image
+        run: |
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/mobile_price_model:latest
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/mobile_price_model:v1
